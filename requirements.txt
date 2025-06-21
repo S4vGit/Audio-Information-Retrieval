@@ -1,3 +1,5 @@
 librosa
 pinecone
 pydub
+fastapi
+uvicorn
