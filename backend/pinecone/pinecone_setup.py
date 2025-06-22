@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 
-def initialize_pinecone_index(index_name: str, dimension: int, metric: str = "cosine"):
+def initialize_pinecone_index_features(index_name: str, dimension: int, metric: str = "cosine"):
     """
     Setup and initialize a Pinecone index with the specified name.
 
@@ -23,7 +23,7 @@ def initialize_pinecone_index(index_name: str, dimension: int, metric: str = "co
     try:
         # Initialize Pinecone with the API key
         pc = Pinecone(api_key=api_key)
-        print(f"Connessione a Pinecone stabilita")
+        print(f"Connected to Pinecone.")
 
         # Check if the index already exists
         if not pc.has_index(index_name):
@@ -47,7 +47,7 @@ def initialize_pinecone_index(index_name: str, dimension: int, metric: str = "co
 
     except Exception as e:
         print(f"Error during the initialization or creation of the index: {e}")
-        raise 
+        raise
 
 """# Example usage
 if __name__ == "__main__":

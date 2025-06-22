@@ -6,7 +6,7 @@ from sklearn.metrics import recall_score, f1_score
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from backend.pinecone.feature_extraction import extract_combined_features_vector
-from backend.pinecone.pinecone_setup import initialize_pinecone_index
+from backend.pinecone.pinecone_setup import initialize_pinecone_index_features
 
 def start_evaluation(index, features: list, ):
     """
@@ -17,6 +17,7 @@ def start_evaluation(index, features: list, ):
         features (list): List of feature types to use for evaluation. Supported types are
                         ('mfcc', 'sc', 'rms', 'zcr').
     """
+    train_path = "dataset/train" # Path to the training directory
 
     VECTOR_DIMENSION = 0 # Dimension of the vectors stored in the Pinecone index. It will be calculated based on the features.
     for feature in features:
@@ -53,49 +54,36 @@ def start_evaluation(index, features: list, ):
             return parts[1]
         return None
 
-    def count_speakers_in_index(pinecone_index):
+    def count_audio_per_speakers_in_train_directory(train_data_path: str) -> dict:
         """ 
-        Counts the number of audio items in the Pinecone index for each speaker.
+        Count the number of audio elements for each speaker in the training directory.
 
         Args:
-            pinecone_index: The Pinecone index to query for speaker counts.
+            train_data_path (str): Path to the training directory containing subdirectories for each speaker.
 
         Returns:
-            dict: A dictionary with speaker IDs as keys and the count of their audio items as values.
+            dict: A dictionary where keys are speaker IDs and values are the counts of audio files for each speaker.
         """
         speaker_counts = defaultdict(int)
+        print(f"Counting audio elements for each speaker in the directory '{train_data_path}'...")
+        
+        train_path = Path(train_data_path)
+        if not train_path.exists() or not train_path.is_dir():
+            print(f"ATTENTION: The directory '{train_data_path}' does not exist or is not a directory.")
+            return speaker_counts
 
-        print(f"Counting items in Pinecone index '{pinecone_index.namespace}' to get speaker distribution...")
-
-        try:
-            stats = pinecone_index.describe_index_stats()
-            if stats.dimension == 0 and not stats.namespaces: # Check if the index is empty
-                print("Index is empty.")
-                return speaker_counts
-
-            all_possible_speaker_ids = [f"{i:02d}" for i in range(1, 61)]
-
-            print(f"Attempting to count each speaker_id using filtered queries (can be slow for large indices)...")
-            for speaker_id in all_possible_speaker_ids:
-                try:
-                    dummy_vector = [0.0] * VECTOR_DIMENSION 
-                    speaker_query_results = pinecone_index.query(
-                        vector=dummy_vector,
-                        top_k=10000, # Sufficientemente grande per catturare tutti
-                        filter={"speaker_id": speaker_id},
-                        include_metadata=False
-                    )
-                    speaker_counts[speaker_id] = len(speaker_query_results.matches)
-
-                except Exception as e:
-                    print(f"Error counting speaker {speaker_id} in Pinecone: {e}")
-                    speaker_counts[speaker_id] = 0
-        except Exception as e:
-            print(f"Error getting index stats: {e}")
+        
+        for speaker_dir in os.listdir(train_path):
+            speaker_full_path = train_path / speaker_dir
+            if speaker_full_path.is_dir() and speaker_dir.isdigit():
+                current_speaker_id = speaker_dir
+                for audio_file in speaker_full_path.rglob("*.wav"): # Count only .wav files
+                    speaker_counts[current_speaker_id] += 1
+        print("Counting completed.")
         return speaker_counts
 
     # Compute the total number of relevant items per speaker in the index
-    total_relevant_items_per_speaker = count_speakers_in_index(index)
+    total_relevant_items_per_speaker = count_audio_per_speakers_in_train_directory(train_path)
 
 
     test_set_path = "dataset/test"
@@ -272,7 +260,7 @@ def start_evaluation(index, features: list, ):
             
             
             
-"""# Example usage
+# Example usage
 if __name__ == "__main__":
-    index = initialize_pinecone_index("speaker-recognition-mfcc-sc", 14)
-    start_evaluation(index, features=['mfcc', 'sc'])"""
+    index = initialize_pinecone_index_features("speaker-recognition-mfcc-sc", 14)
+    start_evaluation(index, features=['mfcc', 'sc'])

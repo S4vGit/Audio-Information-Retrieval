@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
-from backend.pinecone.pinecone_setup import initialize_pinecone_index
+from backend.pinecone.pinecone_setup import initialize_pinecone_index_features
 from backend.pinecone.index_creation import index_creation_entries
 from backend.pinecone.evaluation import start_evaluation
 
@@ -16,7 +16,7 @@ def main():
             dimension += 1
             
     indexName = "speaker-recognition-mfcc-sc" # Index name to be used in Pinecone
-    index = initialize_pinecone_index(indexName, dimension, "cosine")
+    index = initialize_pinecone_index_features(indexName, dimension, "cosine")
     
     vectors_for_upsert = index_creation_entries(features, n_mfcc)
     # Upsert dei vettori nell'indice Pinecone
