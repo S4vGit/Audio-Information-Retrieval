@@ -1,6 +1,7 @@
 import os, sys
 import numpy as np
 import joblib
+import random
 from collections import defaultdict
 from sklearn.metrics import recall_score, f1_score
 from pathlib import Path
@@ -8,7 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from backend.pinecone.feature_extraction import extract_combined_features_vector
 from backend.pinecone.pinecone_setup import initialize_pinecone_index_features
 
-def start_evaluation(index, features: list, ):
+def start_evaluation(index, features: list, total_relevant_items_per_speaker: dict, percentage: float = 1.0):
     """
     Executes the evaluation of the Pinecone index using the specified features.
     
@@ -16,8 +17,10 @@ def start_evaluation(index, features: list, ):
         index (pinecone.Index): The Pinecone index to evaluate.
         features (list): List of feature types to use for evaluation. Supported types are
                         ('mfcc', 'sc', 'rms', 'zcr').
+        total_relevant_items_per_speaker (dict): A dictionary where keys are speaker IDs and values are the counts of audio files for each speaker.
+        percentage (float): Percentage of audio files to use for evaluation, between 0.0 and 1.0.
     """
-    train_path = "dataset/train" # Path to the training directory
+    #train_path = "dataset/train" # Path to the training directory
 
     VECTOR_DIMENSION = 0 # Dimension of the vectors stored in the Pinecone index. It will be calculated based on the features.
     for feature in features:
@@ -83,10 +86,46 @@ def start_evaluation(index, features: list, ):
         return speaker_counts
 
     # Compute the total number of relevant items per speaker in the index
-    total_relevant_items_per_speaker = count_audio_per_speakers_in_train_directory(train_path)
+    #total_relevant_items_per_speaker = count_audio_per_speakers_in_train_directory(train_path)
 
 
-    test_set_path = "dataset/test"
+    test_set_path = Path("dataset/test")
+    
+    # Selection logic for test audio files
+    speaker_test_audio_files = defaultdict(list)
+    print(f"Grouping of test audio files per speaker from directory: {test_set_path}...")
+    for speaker_dir_name in os.listdir(test_set_path):
+        speaker_full_path = test_set_path / speaker_dir_name
+        if speaker_full_path.is_dir():
+            # Iterate through all .wav files in the speaker's directory
+            for audio_path in speaker_full_path.glob("*.wav"):
+                try:
+                    # Get the speaker ID from the filename
+                    file_speaker_id = get_speaker_id_from_filename(audio_path)
+                    if file_speaker_id == speaker_dir_name:
+                        speaker_test_audio_files[speaker_dir_name].append(audio_path)
+                    else:
+                        print(f"Attention: Mismatch speaker ID in the name file ({file_speaker_id}) and directory ({speaker_dir_name}) for {audio_path.name}. Skipped.")
+                except Exception as e:
+                    print(f"ERROR during processing of test file {audio_path}: {e}")
+    print(f"Found audio test file for {len(speaker_test_audio_files)} speakers.")
+
+    selected_test_audio_paths = []
+    print(f"Selection of {percentage*100:.0f}% of test audio files per speaker for evaluation...")
+    for speaker_id, audio_list in speaker_test_audio_files.items():
+        if not audio_list:
+            continue
+
+        num_to_select = int(len(audio_list) * percentage)
+        
+        # If the percentage is greater than 0 and no files are selected, select at least one file
+        if percentage > 0 and num_to_select == 0 and len(audio_list) > 0:
+            num_to_select = 1
+
+        selected_speaker_test_samples = random.sample(audio_list, min(num_to_select, len(audio_list)))
+        selected_test_audio_paths.extend(selected_speaker_test_samples)
+    
+    print(f"Total test audio files selected for the queries: {len(selected_test_audio_paths)}")
 
     # Lists to store true and predicted labels for different metrics
     true_labels_p1 = []
@@ -105,7 +144,7 @@ def start_evaluation(index, features: list, ):
 
     print("\nStarting evaluation on the test set...")
 
-    for speaker_dir in os.listdir(test_set_path):
+    """for speaker_dir in os.listdir(test_set_path):
         speaker_id = speaker_dir
         speaker_full_path = os.path.join(test_set_path, speaker_dir)
 
@@ -113,67 +152,69 @@ def start_evaluation(index, features: list, ):
             for audio_file_name in os.listdir(speaker_full_path):
                 if audio_file_name.endswith(".wav"):
                     file_path = os.path.join(speaker_full_path, audio_file_name)
-                    true_speaker_id = get_speaker_id_from_filename(file_path)
+                    true_speaker_id = get_speaker_id_from_filename(file_path)"""
+    for file_path in selected_test_audio_paths:
+        true_speaker_id = get_speaker_id_from_filename(file_path)
 
-                    if true_speaker_id is None or true_speaker_id != speaker_id:
-                        print(f"Warning: Mismatch or missing speaker ID for {file_path}. Expected {speaker_id}, Got {true_speaker_id}. Skipping.")
-                        continue
+        if true_speaker_id is None: # or true_speaker_id != speaker_id
+            print(f"Warning: Mismatch or missing speaker ID for {file_path}. Expected {speaker_id}, Got {true_speaker_id}. Skipping.")
+            continue
 
-                    # Extracting vector features from the audio file (not scaled)
-                    raw_query_vector = extract_combined_features_vector(file_path, features)
+        # Extracting vector features from the audio file (not scaled)
+        raw_query_vector = extract_combined_features_vector(file_path, features)
 
-                    if raw_query_vector is None:
-                        continue
+        if raw_query_vector is None:
+            continue
 
-                    if feature_scaler is None:
-                        print("Error: StandardScaler is not initialized. Exiting evaluation.")
-                        exit()
+        if feature_scaler is None:
+            print("Error: StandardScaler is not initialized. Exiting evaluation.")
+            exit()
 
-                    # Scaling the raw vector
-                    scaled_query_vector = feature_scaler.transform(raw_query_vector.reshape(1, -1))[0] 
+        # Scaling the raw vector
+        scaled_query_vector = feature_scaler.transform(raw_query_vector.reshape(1, -1))[0] 
 
-                    total_queries += 1 # Increment the total queries count
+        total_queries += 1 # Increment the total queries count
 
-                    try:
-                        # Querying Pinecone with the scaled vector
-                        query_results_10 = index.query(
-                            vector=scaled_query_vector.tolist(), # Scaled vector
-                            top_k=10,
-                            include_metadata=True
-                        )
+        try:
+            # Querying Pinecone with the scaled vector
+            query_results_10 = index.query(
+                vector=scaled_query_vector.tolist(), # Scaled vector
+                top_k=10,
+                include_metadata=True
+            )
 
-                        predicted_speaker_ids_full = [match.metadata.get('speaker_id') for match in query_results_10.matches]
+            predicted_speaker_ids_full = [match.metadata.get('speaker_id') for match in query_results_10.matches]
 
-                        # --- Updating Precision@1 ---
-                        if len(query_results_10.matches) >= 1:
-                            predicted_speaker_id_1 = query_results_10.matches[0].metadata.get('speaker_id')
-                            true_labels_p1.append(true_speaker_id)
-                            predicted_labels_p1.append(predicted_speaker_id_1)
-                            if predicted_speaker_id_1 == true_speaker_id: # If the first match is correct
-                                correct_predictions_p1 += 1 # Increment correct predictions for P@1
-                        else: # If no matches, append None
-                            true_labels_p1.append(true_speaker_id)
-                            predicted_labels_p1.append(None)
+            # --- Updating Precision@1 ---
+            if len(query_results_10.matches) >= 1:
+                predicted_speaker_id_1 = query_results_10.matches[0].metadata.get('speaker_id')
+                true_labels_p1.append(true_speaker_id)
+                predicted_labels_p1.append(predicted_speaker_id_1)
+                if predicted_speaker_id_1 == true_speaker_id: # If the first match is correct
+                    correct_predictions_p1 += 1 # Increment correct predictions for P@1
+            else: # If no matches, append None
+                true_labels_p1.append(true_speaker_id)
+                predicted_labels_p1.append(None)
 
-                        # --- Updating Precision@5 ---
-                        # Check if the true speaker is in the top-5 predictions
-                        if len(query_results_10.matches) >= 5:
-                            predicted_speaker_ids_5 = [match.metadata.get('speaker_id') for match in query_results_10.matches[:5]]
-                            if true_speaker_id in predicted_speaker_ids_5: # If the true speaker is among the top-5
-                                correct_predictions_p5 += 1 # Increment correct predictions for P@5
-                        elif true_speaker_id in predicted_speaker_ids_full: # If there are less than 5 matches, check against all
-                            correct_predictions_p5 += 1 # Increment correct predictions for P@5
+            # --- Updating Precision@5 ---
+            # Check if the true speaker is in the top-5 predictions
+            if len(query_results_10.matches) >= 5:
+                predicted_speaker_ids_5 = [match.metadata.get('speaker_id') for match in query_results_10.matches[:5]]
+                if true_speaker_id in predicted_speaker_ids_5: # If the true speaker is among the top-5
+                    correct_predictions_p5 += 1 # Increment correct predictions for P@5
+            elif true_speaker_id in predicted_speaker_ids_full: # If there are less than 5 matches, check against all
+                correct_predictions_p5 += 1 # Increment correct predictions for P@5
 
-                        # --- Updating Precision@10 and Recall ---
-                        true_labels_p10.append(true_speaker_id)
-                        predicted_labels_p10.append(predicted_speaker_ids_full)
-                        if true_speaker_id in predicted_speaker_ids_full: # If the true speaker is among the top-10 predictions
-                            correct_predictions_p10 += 1 # Increment correct predictions for P@10
-                            retrieved_true_positives_per_speaker[true_speaker_id] += 1 # Increment true positives for custom Recall
+            # --- Updating Precision@10 and Recall ---
+            true_labels_p10.append(true_speaker_id)
+            predicted_labels_p10.append(predicted_speaker_ids_full)
+            if true_speaker_id in predicted_speaker_ids_full: # If the true speaker is among the top-10 predictions
+                correct_predictions_p10 += 1 # Increment correct predictions for P@10
+                retrieved_true_positives_per_speaker[true_speaker_id] += 1 # Increment true positives for custom Recall
 
-                    except Exception as e:
-                        print(f"Error querying Pinecone for {file_path}: {e}")
-                        continue
+        except Exception as e:
+            print(f"Error querying Pinecone for {file_path}: {e}")
+            continue
 
     print(f"Elaboration completed. Total queries: {total_queries}")
 
@@ -260,7 +301,7 @@ def start_evaluation(index, features: list, ):
             
             
             
-# Example usage
+"""# Example usage
 if __name__ == "__main__":
-    index = initialize_pinecone_index_features("speaker-recognition-mfcc-sc", 14)
-    start_evaluation(index, features=['mfcc', 'sc'])
+    index = initialize_pinecone_index_features("speaker-recognition-mfcc-sc", 14, list, 1.0)
+    start_evaluation(index, features=['mfcc', 'sc'])"""
