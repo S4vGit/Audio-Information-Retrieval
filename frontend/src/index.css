@@ -1,85 +1,253 @@
-/*
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/* frontend/src/index.css */
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
+/* Stili Globali */
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  color: #333;
+  background: linear-gradient(135deg, #e0f2f7, #c1d9e6); /* Sfumatura di blu chiaro */
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* Allinea in alto */
+  padding: 20px; /* Padding generale */
+}
+
+h1, h2, h3 {
+  color: #2c3e50; /* Blu scuro per i titoli */
+  margin-bottom: 20px;
 }
 
 h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+  font-size: 2.8em;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 40px;
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 15px 30px;
+  border-radius: 12px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+  border: 1px solid #a7d9f7; /* Bordo blu chiaro */
 }
 
-button {
+/* Stili per il Contenitore Generale dei Componenti */
+.components-container {
+  display: grid;
+  grid-template-columns: 1fr; /* Una colonna di default */
+  gap: 30px;
+  width: 100%;
+  max-width: 900px; /* Larghezza massima per il contenitore */
+  padding: 0 20px; /* Padding orizzontale */
+}
+
+@media (min-width: 768px) { /* Due colonne su schermi più grandi */
+  .components-container {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Stili comuni per i box dei componenti */
+.component-box {
+  background-color: #ffffff; /* Sfondo bianco */
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+}
+
+.component-box h2 {
+  font-size: 1.8em;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 25px;
+  color: #34495e; /* Blu-grigio scuro */
+}
+
+/* Stili per gli input e le label */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.form-group input[type="file"],
+.form-group input[type="text"] {
+  width: calc(100% - 20px); /* Larghezza completa meno padding */
+  padding: 10px;
+  border: 1px solid #ccc;
   border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
   font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+  color: #333;
+  box-sizing: border-box; /* Include padding e border nella larghezza */
+}
+
+.form-group input[type="file"]:focus,
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: #6a8cff; /* Bordo blu all'attivazione */
+  box-shadow: 0 0 0 3px rgba(106, 140, 255, 0.2);
+}
+
+.selected-file-info {
+  margin-top: 10px;
+  font-size: 0.85em;
+  color: #666;
+}
+
+/* Stili per i messaggi di errore */
+.error-message {
+  color: #c0392b; /* Rosso più scuro */
+  font-size: 0.9em;
+  margin-bottom: 20px;
+  padding: 12px;
+  background-color: #fce4e4; /* Sfondo rosso chiaro */
+  border: 1px solid #f0b5b5;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Stili per i pulsanti */
+.action-button {
+  width: 100%;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1em;
+  font-weight: 700;
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+/* Pulsante Carica Audio */
+.speaker-recognition-button {
+  background-color: #8e44ad; /* Blu */
+  color: white;
 }
-*/
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-/* frontend/src/index.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+.speaker-recognition-button:hover:not(:disabled) {
+  background-color: #6c3483; /* Blu più scuro */
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
 
-/* Optional: Importa il font Inter (se non lo fai tramite CDN o @import) */
-/* Esempio di importazione da Google Fonts */
+/* Pulsante Fai la domanda */
+.semantic-query-button {
+  background-color: #8e44ad; /* Viola */
+  color: white;
+}
 
+.semantic-query-button:hover:not(:disabled) {
+  background-color: #6c3483; /* Viola più scuro */
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
 
-html, body, #root {
-  font-family: 'Inter', sans-serif;
-  height: 100%;
+.action-button:disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+  opacity: 0.8;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Icona di caricamento (spin) */
+.loading-spinner {
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+  height: 20px;
+  width: 20px;
+  color: white; /* Colore dello spinner */
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Stili per i risultati */
+.results-section {
+  margin-top: 30px;
+  padding-top: 25px;
+  border-top: 1px solid #eee;
+}
+
+.results-section h3 {
+  font-size: 1.5em;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 20px;
+  color: #34495e;
+}
+
+.results-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.result-item {
+  background-color: #f8f9fa; /* Grigio molto chiaro */
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid #e9ecef;
+  margin-bottom: 15px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease;
+}
+
+.result-item:hover {
+  transform: translateY(-3px);
+}
+
+.result-item p {
+  margin: 0;
+  font-size: 0.95em;
+  color: #444;
+}
+
+.result-item .speaker-id {
+  font-weight: 700;
+  color: #2c77a9; /* Blu per ID speaker */
+}
+
+.result-item .similarity-score,
+.result-item .score {
+  font-weight: 600;
+  color: #555;
+  font-size: 0.9em;
+}
+
+.result-item .metadata-details {
+  margin-top: 8px;
+  font-size: 0.8em;
+  color: #666;
+  line-height: 1.4;
+  padding-left: 10px;
+  border-left: 2px solid #ddd;
+}
+
+.result-item .metadata-details p {
+  margin-bottom: 3px;
+}
+
+.footer {
+  margin-top: 40px;
+  color: #777;
+  font-size: 0.85em;
+  text-align: center;
 }
