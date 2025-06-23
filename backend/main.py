@@ -9,12 +9,8 @@ import numpy as np
 import os
 import librosa
 import soundfile as sf
-import tempfile # Per gestire file temporanei in modo sicuro
-
-# Importa le funzioni dalla tua struttura di progetto
+import tempfile 
 import sys
-# Aggiusta il sys.path per importare i moduli da backend/pinecone
-# Questo aggiunge la cartella 'backend' al PYTHONPATH
 sys.path.append(str(Path(__file__).resolve().parent)) 
 
 from backend.pinecone.feature_extraction import extract_combined_features_vector
@@ -56,18 +52,17 @@ speaker_recognition_scaler = None
 # --- Funzione per la conversione audio ---
 def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
     """
-    Converte un file audio di vari formati nel formato .wav.
+    Convert a given audio file to WAV format using librosa and soundfile.
 
     Args:
-        input_audio_path (Path): Il percorso al file audio di input (es., .mp3, .flac, .ogg, ecc.).
-        output_wav_path (Path): Il percorso desiderato per il file .wav di output.
-                                 Deve terminare con '.wav'.
+        input_audio_path (Path): Path to the input audio file.
+        output_wav_path (Path): Path to the output WAV file.
 
     Returns:
-        Path: Il percorso al file .wav convertito se l'operazione ha successo, None altrimenti.
+        Path: Path to the converted WAV file, or None if conversion fails.
     """
     if not output_wav_path.lower().endswith('.wav'):
-        print(f"Errore: output_wav_path deve terminare con '.wav', ma è '{output_wav_path}'")
+        print(f"Erorr: output_wav_path must end with '.wav', but '{output_wav_path}'")
         return None
 
     try:
@@ -78,21 +73,21 @@ def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
         # Scrivi i dati audio in un file WAV
         sf.write(str(output_wav_path), y, sr)
 
-        print(f"Convertito con successo '{input_audio_path.name}' in '{output_wav_path.name}'")
+        print(f"Successfully converted '{input_audio_path.name}' in '{output_wav_path.name}'")
         return output_wav_path
     except Exception as e:
-        print(f"Errore durante la conversione del file audio '{input_audio_path.name}': {e}")
+        print(f"Error during convertion of audio file '{input_audio_path.name}': {e}")
         return None
 
 app = FastAPI()
 
-# Middleware CORS per consentire le richieste dal frontend React
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"], # SOSTITUISCI CON L'URL DEL TUO FRONTEND IN PRODUZIONE!
+    allow_origins=["http://localhost:5173"], 
     allow_credentials=True,
-    allow_methods=["*"], # Consenti tutti i metodi (GET, POST, ecc.)
-    allow_headers=["*"], # Consenti tutti gli header
+    allow_methods=["*"], 
+    allow_headers=["*"], 
 )
 
 @app.on_event("startup")
