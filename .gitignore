@@ -1,6 +1,7 @@
 # =============== Generale / OS ===============
 .DS_Store           # macOS system files
 .env                # Environment variables for both frontend and backend
+**.env               # Catch-all for any .env files
 .env.* # Potentially other .env variations
 .pytest_cache/      # pytest cache directory
 .vscode/            # VS Code specific settings (if you don't want to share)
