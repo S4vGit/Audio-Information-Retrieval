@@ -3,3 +3,4 @@ pinecone
 pydub
 fastapi
 uvicorn
+soundfile
