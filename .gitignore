@@ -25,7 +25,7 @@ storybook-static/   # Storybook build output
 .parcel-cache/      # Parcel cache (if used)
 
 # =============== Python / Backend (FastAPI) ===============
-__pycache__/        # Python compiled bytecode cache
+*.__pycache__/        # Python compiled bytecode cache
 backend/pinecone/__pycache__/  # Pinecone specific cache
 backend/__pycache__/  # General Python cache
 backend/scalers/    # Directory for scaler files (if used)
