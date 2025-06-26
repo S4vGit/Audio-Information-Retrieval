@@ -332,7 +332,7 @@ async def text_query(query: NLQuery):
     
     SYSTEM_PROMPT = """
 You are given the schema of a Neo4j graph database with the following entities and relationships:
-- Speaker nodes with properties: id, age, gender, native_speaker
+- Speaker nodes with properties: id, age (integer), gender (male or female), native_speaker (yes or no)
 - Accent nodes with property: name
 - Location nodes with properties: city, country
 - RecordingRoom nodes with property: name
@@ -340,7 +340,11 @@ Relations:
 - (s:Speaker)-[:HAS_ACCENT]->(a:Accent)
 - (s:Speaker)-[:RECORDED_IN {date}]->(r:RecordingRoom)
 - (s:Speaker)-[:FROM_LOCATION]->(l:Location)
-Generate ONLY the valid Cypher query that fulfills the user's requirement in one single statement. KEEP IN MIND: the operator "!=" doesn't work, use "<>" instead. Do not include any explanations or code comments."""
+Generate ONLY the valid Cypher query that fulfills the user's requirement in one single statement. 
+IMPORTANT: For numeric comparisons, use operators like <, >, <=, >= directly (e.g., s.age < 30), do NOT use functions like lt(), gt(), etc.
+KEEP IN MIND: the operator "!=" doesn't work, use "<>" instead. 
+For property comparisons other than equality, use the WHERE clause. Do not use comparison operators inside curly braces.
+Do not include any explanations or code comments."""
 
     
     messages = [
@@ -352,7 +356,7 @@ Generate ONLY the valid Cypher query that fulfills the user's requirement in one
         resp = client.chat.completions.create(  # Call LLM Studio to generate Cypher
             model="local-model",
             messages=messages,
-            temperature=0.5,
+            temperature=0.3,
             max_tokens=500,
             stream=False
             )
