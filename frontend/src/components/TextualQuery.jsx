@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 
-function SemanticQuery() {
+function TextualQueryNeo4j() {
   const [textQuery, setTextQuery] = useState('');
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState(null); // To store both cypher and neo4j results
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -14,11 +14,15 @@ function SemanticQuery() {
 
     setLoading(true);
     setError(null);
-    setResults([]);
+    setResults(null); // Clear previous results
 
     try {
-      const response = await fetch(`http://localhost:8000/query-semantic/?q=${encodeURIComponent(textQuery)}`, {
-        method: 'GET',
+      const response = await fetch(`http://localhost:8000/text-query/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nl_query: textQuery }), // Send as JSON body
       });
 
       if (!response.ok) {
@@ -27,8 +31,8 @@ function SemanticQuery() {
       }
 
       const data = await response.json();
-      setResults(data.results);
-      console.log('Result textual query:', data.results);
+      setResults(data); // Store the entire response (cypher, results)
+      console.log('Result textual query:', data);
 
     } catch (err) {
       console.error('Error textual query:', err);
@@ -46,14 +50,14 @@ function SemanticQuery() {
 
       <div className="form-group">
         <label htmlFor="text-query">
-          Make a query on speaker's metadata:
+          Make a natural language query on speaker's metadata:
         </label>
         <input
           type="text"
           id="text-query"
           value={textQuery}
           onChange={(e) => setTextQuery(e.target.value)}
-          placeholder="e.g.: old people with english accent"
+          placeholder="e.g.: speakers from Italy"
         />
       </div>
 
@@ -74,39 +78,42 @@ function SemanticQuery() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            Ricerca in corso...
+            Querying...
           </span>
         ) : (
           'Submit Query'
         )}
       </button>
 
-      {results.length > 0 && (
+      {results && (
         <div className="results-section">
-          <h3>Text Query Results:</h3>
-          <ul className="results-list">
-            {results.map((result, index) => (
-              <li key={index} className="result-item">
-                <p>Speaker ID: <span className="speaker-id">{result.speaker_id}</span></p>
-                <p>Similarity Score: <span className="similarity-score">{result.similarity_score.toFixed(4)}</span></p>
-                {result.metadata && (
-                  <div className="metadata-details">
-                    <p>Gender: {result.metadata.gender || 'N/A'}</p>
-                    <p>Age: {result.metadata.age || 'N/A'}</p>
-                    <p>Accent: {result.metadata.accent || 'N/A'}</p>
-                    <p>Origin: {result.metadata.origin || 'N/A'}</p>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          <p className="info-text">
-            Il punteggio di similarità indica quanto il profilo dello speaker è vicino alla tua domanda.
-          </p>
+          <h3>Neo4j Query Results:</h3>
+          {results.cypher && (
+            <div className="cypher-query-section">
+              <h4>Generated Cypher Query:</h4>
+              <pre className="cypher-code"><code>{results.cypher}</code></pre>
+            </div>
+          )}
+          {results.results && results.results.length > 0 ? (
+            <ul className="results-list">
+              {results.results.map((record, index) => (
+                <li key={index} className="result-item">
+                  {Object.entries(record).map(([key, value]) => (
+                    <p key={key}>
+                      <span className="result-key">{key}:</span>{' '}
+                      <span className="result-value">{JSON.stringify(value)}</span>
+                    </p>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="info-text">No results found for your query.</p>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-export default SemanticQuery;
+export default TextualQueryNeo4j;

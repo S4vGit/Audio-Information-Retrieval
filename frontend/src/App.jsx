@@ -1,15 +1,13 @@
-// frontend/src/App.jsx
 import React from 'react';
-import './index.css'; // Importa il file CSS personalizzato
+import './index.css'; 
 
-// Importa i componenti (questo è lo stesso di prima, le modifiche sono interne ai componenti)
 import SpeakerRecognition from './components/SpeakerRecognition';
-import SemanticQuery from './components/SemanticQuery';
+import SemanticQuery from './components/TextualQuery';
 
 function App() {
   return (
-    <div className="app-container"> {/* Nuova classe CSS per il contenitore principale */}
-      <h1 className="main-title"> {/* Nuova classe CSS per il titolo */}
+    <div className="app-container">
+      <h1 className="main-title">
         🎤 Audio Information Retrieval System 🎤
       </h1>
 
