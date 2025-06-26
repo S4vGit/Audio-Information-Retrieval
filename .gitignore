@@ -27,8 +27,8 @@ storybook-static/   # Storybook build output
 
 # =============== Python / Backend (FastAPI) ===============
 **/__pycache__/        # Python compiled bytecode cache
-backend/pinecone/__pycache__/  # Pinecone specific cache
-backend/__pycache__/  # General Python cache
+backend/pinecone/__pycache__  # Pinecone specific cache
+backend/__pycache__ # General Python cache
 backend/scalers/    # Directory for scaler files (if used)
 *.pyc               # Python compiled bytecode files
 .Python             # Older virtualenv directoy
