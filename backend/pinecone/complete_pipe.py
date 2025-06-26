@@ -6,6 +6,9 @@ from backend.pinecone.index_creation import index_creation_entries
 from backend.pinecone.evaluation import start_evaluation
 
 def main():
+    # ------------------
+    # Initialize parameters and Pinecone index
+    # ------------------
     features = ['mfcc', 'sc', 'rms', 'zcr'] # Features to be extracted from the audio files. Available options: 'mfcc', 'sc', 'rms', 'zcr'.
     n_mfcc = 13 # Number of MFCCs to extract if 'mfcc' is in features. Default is 13.
     dimension = 0  # Dimension of the vectors to be stored in the Pinecone index. It will be calculated based on the features.
@@ -24,13 +27,18 @@ def main():
     
     vectors_for_upsert, audio_speaker_count = index_creation_entries(features, n_mfcc, data_percentage)
 
+    # ------------------
     # Upsert the vectors into the Pinecone index
+    # ------------------
     print(f"\nStarted upserting of {len(vectors_for_upsert)} scaled vectors in the index '{indexName}'...")
     for i in range(0, len(vectors_for_upsert), 100):
         batch = vectors_for_upsert[i:i + 100]
         index.upsert(vectors=batch)
     print(f"Upserting completed. {len(vectors_for_upsert)} vectors loaded in the index '{indexName}'.")
 
+    # ------------------
+    # Start metrics evaluation
+    # ------------------
     start_evaluation(index, features, audio_speaker_count, data_percentage)
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 
+# --- Pinecone Index Initialization Function ---
 def initialize_pinecone_index_features(index_name: str, dimension: int, metric: str = "cosine"):
     """
     Setup and initialize a Pinecone index with the specified name.
@@ -18,11 +19,11 @@ def initialize_pinecone_index_features(index_name: str, dimension: int, metric: 
     load_dotenv()
 
     # Get the Pinecone API key from environment variables
-    api_key = os.getenv("PINECONE_API_KEY")
+    API_KEY = os.getenv("PINECONE_API_KEY")
 
     try:
         # Initialize Pinecone with the API key
-        pc = Pinecone(api_key=api_key)
+        pc = Pinecone(api_key=API_KEY)
         print(f"Connected to Pinecone.")
 
         # Check if the index already exists
@@ -49,7 +50,7 @@ def initialize_pinecone_index_features(index_name: str, dimension: int, metric: 
         print(f"Error during the initialization or creation of the index: {e}")
         raise
 
-"""# Example usage
+"""# --- Example usage ---
 if __name__ == "__main__":
     index_name = "audio-retrieval" # Index name to be used in Pinecone
 

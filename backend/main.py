@@ -1,11 +1,10 @@
-# backend/main.py
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
+from backend.models import SpeakerResult, NLQuery
 import joblib
 import numpy as np
 import os
@@ -14,30 +13,39 @@ import librosa
 import soundfile as sf
 import tempfile 
 import sys
-import pysolr
+import openai
 sys.path.append(str(Path(__file__).resolve().parent)) 
 
 from backend.pinecone.feature_extraction import extract_combined_features_vector
 from backend.pinecone.pinecone_setup import initialize_pinecone_index_features
 from backend.text_retrieval import load_metadata, build_textual_profiles, compute_embeddings
+from neo4j_connector import Neo4jConnector
 
-# --- Configurazione delle Feature e dell'Indice (DEVE CORRISPONDERE ALLA TUA FASE DI INDICIzzAZIONE) ---
-# Queste feature e n_mfcc devono essere le stesse usate per creare l'indice Pinecone
-# e per addestrare lo scaler.
-USED_FEATURES = ['mfcc', 'sc', 'rms', 'zcr'] # Esempio: ['mfcc', 'sc', 'rms', 'zcr'] o solo ['mfcc']
-N_MFCC_USED = 13               # Il numero di MFCC usati durante l'indicizzazione
-SPEAKER_RECOGNITION_INDEX_NAME = "speaker-recognition-mfcc-sc-rms-zcr" # Il nome del tuo indice Pinecone
 
-# --- Mappatura delle dimensioni per calcolare la dimensione totale del vettore ---
+# --- Feature and Index Configuration ---
+USED_FEATURES = ['mfcc', 'sc', 'rms', 'zcr'] # Feature used for speaker recognition.
+N_MFCC_USED = 13 # The number of MFCCs used during indexing
+SPEAKER_RECOGNITION_INDEX_NAME = "speaker-recognition-mfcc-sc-rms-zcr" # The name of Pinecone index
+
+# --- Mapping of dimensions to calculate the total vector dimension ---
 FEATURE_DIMENSIONS = {
-    'mfcc': N_MFCC_USED, # Usa N_MFCC_USED per la dimensione di MFCC
+    'mfcc': N_MFCC_USED, # Use N_MFCC_USED for the MFCC dimension
     'sc': 1,
     'rms': 1,
     'zcr': 1,
 }
 
+# --- Function to calculate the vector dimension ---
 def calculate_vector_dimension(features_list: list, n_mfcc: int) -> int:
-    """Calcola la dimensione totale del vettore in base alle feature."""
+    """ Compute the total dimension of the feature vector based on the features used. 
+    
+    Args:
+        features_list (list): List of features to be used.
+        n_mfcc (int): Number of MFCCs to be used if 'mfcc' is in the list.
+        
+    Returns:
+        int: Total dimension of the feature vector.
+    """
     total_dimension = 0
     for feature in features_list:
         if feature == 'mfcc':
@@ -45,26 +53,23 @@ def calculate_vector_dimension(features_list: list, n_mfcc: int) -> int:
         elif feature in FEATURE_DIMENSIONS:
             total_dimension += FEATURE_DIMENSIONS[feature]
         else:
-            raise ValueError(f"Feature '{feature}' non riconosciuta o dimensione non definita.")
+            raise ValueError(f"Feature '{feature}' not recognized.")
     return total_dimension
 
 VECTOR_DIM = calculate_vector_dimension(USED_FEATURES, N_MFCC_USED)
 
-"""# Variabili globali
-metadata = None # Potresti non aver più bisogno di caricare tutto in memoria se usi Solr come fonte primaria
-SOLR_URL = 'http://localhost:8983/solr/audio_metadata_core'
-solr = None # Inizializzeremo la connessione Solr all'avvio"""
-
 # Inizializza Pinecone e lo scaler globalmente una volta all'avvio dell'applicazione
 speaker_recognition_index = None
 speaker_recognition_scaler = None
+neo4j_connector = None
+client = None
 
 text_encoder: SentenceTransformer = None # Modello per embedding testuali
 all_speaker_ids: List[str] = [] # ID degli speaker caricati
 all_metadata_embeddings: np.ndarray = None # Embedding dei profili testuali
 all_raw_metadata: Dict[str, Any] = {} # Metadati originali (utile per i risultati)
 
-# --- Funzione per la conversione audio ---
+# --- Function to convert audio files to WAV format ---
 def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
     """
     Convert a given audio file to WAV format using librosa and soundfile.
@@ -81,11 +86,10 @@ def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
         return None
 
     try:
-        # Carica il file audio. librosa può gestire vari formati.
-        # sr=None mantiene la frequenza di campionamento originale.
+        # Load the audio file
         y, sr = librosa.load(str(input_audio_path), sr=None)
 
-        # Scrivi i dati audio in un file WAV
+        # Write the audio data to a WAV file
         sf.write(str(output_wav_path), y, sr)
 
         print(f"Successfully converted '{input_audio_path.name}' in '{output_wav_path.name}'")
@@ -105,82 +109,53 @@ app.add_middleware(
     allow_headers=["*"], 
 )
 
+# --- Startup Event for scaler, Pinecone, Neo4j and LM Studio ---
 @app.on_event("startup")
 async def startup_event():
     """
-    Funzione eseguita all'avvio dell'applicazione FastAPI.
-    Carica lo scaler e inizializza l'indice Pinecone.
+    Startup event to initialize the Pinecone index, scaler, Neo4j connection, and LM Studio client.
+    This function is called when the FastAPI application starts.
     """
-    global speaker_recognition_index, speaker_recognition_scaler
+    global speaker_recognition_index, speaker_recognition_scaler, neo4j_connector, client
 
-    # Carica lo scaler
-    # Assicurati che questo percorso sia corretto rispetto alla radice del progetto
+    # Load scaler from file
     scalers_dir = Path("backend/scalers")
     feature_names_str = "_".join(USED_FEATURES)
-    
-    # Controlla il nome esatto del file dello scaler.
-    # Se lo hai salvato come 'scaler_feature_mfcc_sc_little.pkl', usa questo:
-    scaler_filename = scalers_dir / f"scaler_feature_{feature_names_str}.pkl"
-    # OPPURE, se hai usato "_little.pkl" nel nome del file dello scaler:
-    # scaler_filename = scalers_dir / f"scaler_feature_{feature_names_str}_little.pkl"
 
+    # Recrete the scaler filename based on the features used
+    scaler_filename = scalers_dir / f"scaler_feature_{feature_names_str}.pkl"
 
     if not scaler_filename.exists():
-        raise RuntimeError(f"File scaler non trovato: {scaler_filename}. Assicurati che esista e che il percorso sia corretto.")
+        raise RuntimeError(f"Scaler file not found: {scaler_filename}. Please ensure the scaler has been trained and saved correctly.")
     
     try:
         speaker_recognition_scaler = joblib.load(scaler_filename)
-        print(f"Scaler caricato con successo da: {scaler_filename}")
+        print(f"Scaler loaded successfully: {scaler_filename}")
     except Exception as e:
-        raise RuntimeError(f"Errore durante il caricamento dello scaler da {scaler_filename}: {e}")
+        raise RuntimeError(f"Error loading scaler from {scaler_filename}: {e}")
 
-    # Inizializza l'indice Pinecone
+    # Initialize Pinecone index
     try:
         speaker_recognition_index = initialize_pinecone_index_features(SPEAKER_RECOGNITION_INDEX_NAME, VECTOR_DIM)
-        print(f"Indice Pinecone '{SPEAKER_RECOGNITION_INDEX_NAME}' inizializzato (Dimensione: {VECTOR_DIM}).")
+        print(f"Initialized Pinecone index '{SPEAKER_RECOGNITION_INDEX_NAME}' (Dimension: {VECTOR_DIM}).")
     except Exception as e:
-        raise RuntimeError(f"Errore durante l'inizializzazione dell'indice Pinecone: {e}")
-
+        raise RuntimeError(f"Error initializing Pinecone index: {e}")
+    
+    # Initialize Neo4j connection
+    try:
+        neo4j_connector = Neo4jConnector()
+    except Exception as e:
+        raise RuntimeError(f"Error connecting to Neo4j: {e}")
+    
+    # Initialize LM Studio client
+    try:
+        client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+    except Exception as e:
+        raise RuntimeError(f"Error connecting to LM Studio client: {e}")
 
 """@app.on_event("startup")
-async def load_data():
-    global metadata # Potresti ancora voler caricare i metadati in memoria per altri scopi o debugging
-    global solr
-    try:
-        # Carica i metadati se ancora necessari per altri scopi nel tuo backend
-        # metadata_path = "dataset/audioMNIST_meta.txt"
-        # with open(metadata_path, 'r', encoding='utf-8') as f:
-        #     metadata = json.load(f)
-        # print("Metadati caricati con successo (in memoria, se necessario).")
-
-        # Inizializza la connessione a Solr
-        solr = pysolr.Solr(SOLR_URL, timeout=10)
-        # Testa la connessione facendo una query semplice
-        solr.ping()
-        print(f"Connessione a Solr stabilita su {SOLR_URL}.")
-
-    except pysolr.SolrError as e:
-        print(f"Errore di connessione a Solr: {e}. Assicurati che Solr sia in esecuzione e il core esista.")
-        solr = None # Imposta a None se la connessione fallisce
-    except Exception as e:
-        print(f"Errore inatteso durante l'avvio: {e}")
-        solr = None
-"""
-
-@app.on_event("startup")
 async def startup_event():
-    global solr, text_encoder, all_speaker_ids, all_metadata_embeddings, all_raw_metadata
-
-    # 1. Inizializzazione Solr
-    #print(f"Tentativo di connessione a Solr all'URL: {SOLR_URL}")
-    #solr = pysolr.Solr(SOLR_URL, always_commit=False) # Commit manuale o tramite script di indicizzazione
-    #try:
-    #    # Tenta una query semplice per verificare la connessione
-    #    solr.search("*:*", rows=0) 
-    #    print("Connessione a Solr riuscita.")
-    #except pysolr.SolrError as e:
-    #    print(f"Errore di connessione a Solr: {e}")
-        # Potresti voler fermare l'applicazione o loggare un errore critico
+    global text_encoder, all_speaker_ids, all_metadata_embeddings, all_raw_metadata
 
     # 2. Inizializzazione SentenceTransformer e caricamento embedding
     print("Inizializzazione SentenceTransformer e caricamento embedding metadati...")
@@ -200,30 +175,30 @@ async def startup_event():
         print(f"Caricati e processati {len(all_speaker_ids)} profili per la ricerca semantica.")
     except Exception as e:
         print(f"Errore durante l'inizializzazione SentenceTransformer/embedding: {e}")
-        # Gestisci l'errore, l'applicazione potrebbe non funzionare correttamente per le query semantiche
+        # Gestisci l'errore, l'applicazione potrebbe non funzionare correttamente per le query semantiche"""
 
 
-# Modello Pydantic per la risposta dell'API
-class SpeakerResult(BaseModel):
-    speaker_id: str
-    score: float
-
+# --- Endpoint for speaker recognition ---
 @app.post("/speaker-recognition/")
 async def upload_audio(audio_file: UploadFile = File(...)):
     """
-    Endpoint per caricare un file audio, estrarre feature, scalarle,
-    e interrogare l'indice Pinecone per il riconoscimento dello speaker.
+    Recognizes the speaker from the uploaded audio file.
+    
+    Args:
+        audio_file (UploadFile): The audio file to be processed.
+    
+    Returns:
+        JSONResponse: A response containing the recognition results.
     """
     if not speaker_recognition_scaler or not speaker_recognition_index:
-        raise HTTPException(status_code=500, detail="Backend non completamente inizializzato. Riprova tra un momento.")
+        raise HTTPException(status_code=500, detail="Pinecone index or scaler not initialized. Please check the server logs.")
 
     original_file_extension = Path(audio_file.filename).suffix.lower()
     
-    # Lista delle estensioni audio supportate
-    supported_audio_extensions = ['.wav', '.mp3', '.flac', '.ogg']
+    supported_audio_extensions = ['.wav', '.mp3', '.flac', '.ogg'] # List of supported audio file extensions
 
     if original_file_extension not in supported_audio_extensions:
-        raise HTTPException(status_code=400, detail=f"Formato file non supportato. Sono supportati solo: {', '.join(supported_audio_extensions)}.")
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported formats are: {', '.join(supported_audio_extensions)}.")
 
     tmp_original_file_path = None
     tmp_wav_file_path = None
@@ -243,64 +218,69 @@ async def upload_audio(audio_file: UploadFile = File(...)):
             tmp_original_file.write(await audio_file.read())
             tmp_original_file_path = Path(tmp_original_file.name)
         
-        # Se il file non è già WAV, convertilo
+        # If the uploaded file is not a WAV file, convert it to WAV format
         if original_file_extension != '.wav':
             tmp_wav_file_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name)
             converted_path = convert_audio_to_wav(tmp_original_file_path, tmp_wav_file_path)
             
             if converted_path is None:
-                raise HTTPException(status_code=500, detail="Errore durante la conversione del file audio in WAV.")
+                raise HTTPException(status_code=500, detail="Error converting audio file to WAV format.")
             audio_for_processing_path = converted_path
         else:
-            audio_for_processing_path = tmp_original_file_path # Usa direttamente il file WAV caricato
-            
-        # 1. Estrai le feature dall'audio
-        # Assicurati che n_mfcc corrisponda a quello usato in fase di training/indicizzazione
+            audio_for_processing_path = tmp_original_file_path # Use the original file path if it's already in WAV format
+
+        # 1. Extract features from the audio
+        # Ensure that n_mfcc matches what was used during training/indexing
         raw_features = extract_combined_features_vector(audio_for_processing_path, USED_FEATURES, N_MFCC_USED)
         if raw_features is None:
-            raise HTTPException(status_code=500, detail="Errore nell'estrazione delle feature dall'audio.")
+            raise HTTPException(status_code=500, detail="Error extracting features from audio.")
 
-        # 2. Scala le feature usando lo scaler caricato
-        # raw_features.reshape(1, -1) è necessario perché scaler.transform si aspetta un input 2D
+        # 2. Scale the features using the loaded scaler
         scaled_features = speaker_recognition_scaler.transform(raw_features.reshape(1, -1))[0]
 
-        # 3. Interroga Pinecone con le feature scalate
+        # 3. Query Pinecone with the scaled features
         query_results = speaker_recognition_index.query(
-            vector=scaled_features.tolist(), # Converti il vettore NumPy in una lista Python
-            top_k=5, # Ottieni i primi 5 speaker più simili
-            include_metadata=True # Includi i metadati per ottenere lo speaker_id
+            vector=scaled_features.tolist(), # Convert the NumPy vector to a Python list
+            top_k=5, # Get the top 5 most similar speakers
+            include_metadata=True # Include metadata 
         )
 
         results = []
-        # Estrai i risultati
+        # Extract results
         for match in query_results.matches:
             speaker_id = match.metadata.get('speaker_id', 'Unknown')
             score = match.score
             results.append(SpeakerResult(speaker_id=speaker_id, score=score))
-        
-        # Ordina i risultati per punteggio in ordine decrescente
+
+        # Sort results by score in descending order
         results.sort(key=lambda x: x.score, reverse=True)
 
-        return {"message": "Audio elaborato con successo", "results": results}
+        return {"message": "Audio processed successfully", "results": results}
 
     except Exception as e:
-        print(f"Errore durante l'elaborazione dell'audio: {e}")
-        # Restituisci un errore HTTP 500 in caso di eccezioni non gestite
-        raise HTTPException(status_code=500, detail=f"Errore interno del server: {e}")
+        print(f"Error processing audio: {e}")
+        # Return a 500 HTTP error for unhandled exceptions
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
     finally:
-        # Pulisci i file temporanei
+        # Clean up temporary files
         if tmp_original_file_path and tmp_original_file_path.exists():
             os.unlink(tmp_original_file_path)
         if tmp_wav_file_path and tmp_wav_file_path.exists():
             os.unlink(tmp_wav_file_path)
 
 @app.get("/query-semantic/")
-async def query_semantic(q: str = Query(..., description="Query di testo per la ricerca semantica")):
+async def query_semantic(q: str = Query(..., description="Query text for semantic search")):
     """
-    Esegue una ricerca semantica sui metadati degli speaker usando gli embedding.
+    Executes a semantic search on speaker metadata using embeddings.
+    
+    Args:
+        q (str): The query text to search for in the speaker metadata.
+        
+    Returns:
+        JSONResponse: A response containing the search results.
     """
     if text_encoder is None or all_metadata_embeddings is None:
-        raise HTTPException(status_code=503, detail="Modello di embedding non caricato o dati non disponibili.")
+        raise HTTPException(status_code=503, detail="Text encoder or metadata embeddings not initialized. Please check the server logs.")
 
     try:
         # 1. Calcola l'embedding della query dell'utente
@@ -338,149 +318,57 @@ async def query_semantic(q: str = Query(..., description="Query di testo per la 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore durante la ricerca semantica: {e}")
 
-"""@app.get("/query-metadata-general-solr/")
-async def query_metadata_general_solr(q: str = Query(..., min_length=1, max_length=150)):
-    if solr is None:
-        raise HTTPException(status_code=500, detail="Connessione a Solr non stabilita.")
-
-    query_lower = q.lower().strip()
+# --- Endpoint for textual query ---
+@app.post("/text-query/")
+async def text_query(query: NLQuery):
+    """ Executes a textual query against the Neo4j database using LM Studio to generate Cypher queries.
     
-    # --- 1. Riconoscimento dell'Intento ---
-    intent = None
-    if any(keyword in query_lower for keyword in ["quanti", "numero di", "conta"]):
-        intent = "count"
-    elif any(keyword in query_lower for keyword in ["età media", "media di età"]):
-        intent = "average_age"
-    elif any(keyword in query_lower for keyword in ["find", "trova", "mostra", "speaker di", "speaker con"]):
-        intent = "list"
-
-    if not intent:
-        intent = "list"
+    Args:
+        query (NLQuery): The natural language query to be converted to Cypher.
     
-    # --- 2. Estrazione dei Filtri Strutturali e Traduzione a Solr Query Language ---
-    solr_query_parts = []
+    Returns:
+        JSONResponse: A response containing the generated Cypher query and the results from Neo4j.
+    """
     
-    # Gender
-    if "female" in query_lower or "women" in query_lower:
-        solr_query_parts.append("gender:female")
-    elif "male" in query_lower or "men" in query_lower:
-        solr_query_parts.append("gender:male")
+    SYSTEM_PROMPT = """
+You are given the schema of a Neo4j graph database with the following entities and relationships:
+- Speaker nodes with properties: id, age, gender, native_speaker
+- Accent nodes with property: name
+- Location nodes with properties: city, country
+- RecordingRoom nodes with property: name
+Relations:
+- (s:Speaker)-[:HAS_ACCENT]->(a:Accent)
+- (s:Speaker)-[:RECORDED_IN {date}]->(r:RecordingRoom)
+- (s:Speaker)-[:FROM_LOCATION]->(l:Location)
+Generate ONLY the valid Cypher query that fulfills the user's requirement in one single statement. KEEP IN MIND: the operator "!=" doesn't work, use "<>" instead. Do not include any explanations or code comments."""
 
-    # Age (più robusto per Solr)
-    age_match = re.search(r'(tra\s+(\d+)\s+e\s+(\d+)\s+anni)|(più di\s*(\d+)\s*anni)|(meno di\s*(\d+)\s*anni)|((\d+)\s*anni)', query_lower)
-    if age_match:
-        if age_match.group(2) and age_match.group(3): # tra X e Y anni
-            solr_query_parts.append(f"age:[{age_match.group(2)} TO {age_match.group(3)}]")
-        elif age_match.group(5): # più di X anni
-            solr_query_parts.append(f"age:[{int(age_match.group(5)) + 1} TO *]")
-        elif age_match.group(7): # meno di X anni
-            solr_query_parts.append(f"age:[* TO {int(age_match.group(7)) - 1}]")
-        elif age_match.group(9): # X anni (esattamente)
-            solr_query_parts.append(f"age:{age_match.group(9)}")
-
-    # Accent
-    accent_keywords = ["tedesco", "Italian", "francese", "spagnolo", "german", "english", "french", "spanish"]
-    for acc in accent_keywords:
-        if acc in query_lower:
-            solr_query_parts.append(f"accent:{acc.capitalize()}") # Assumiamo accent capitalizzato
-            break
-
-    # Origin
-    origin_keywords = ["germania", "europa", "berlino", "Italy", "münster", "dresden", "hamburg", "bremen"]
-    for org in origin_keywords:
-        if org in query_lower:
-            solr_query_parts.append(f"origin:{org.capitalize()}") # Assumiamo origin capitalizzato
-            break
     
-    # Native speaker (usiamo il nome campo dello schema Solr)
-    if "madrelingua si" in query_lower or "native speaker yes" in query_lower:
-        solr_query_parts.append("native_speaker:yes")
-    elif "madrelingua no" in query_lower or "native speaker no" in query_lower:
-        solr_query_parts.append("native_speaker:no")
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": query.nl_query}
+    ]
 
-    # Costruisci la query principale per Solr
-    if solr_query_parts:
-        solr_q = " AND ".join(solr_query_parts)
-    else:
-        solr_q = "*:*" # Ricerca tutti i documenti se nessun filtro strutturale è stato trovato
-
-    # --- 3. Esegui la Query su Solr ---
     try:
-        # Per 'count' e 'average_age' potremmo voler solo i dati aggregati, non tutti i documenti
-        if intent in ["count", "average_age"]:
-            # Solr può fare aggregaizoni direttamente: stats component per media, somma, ecc.
-            # Per il conteggio, basta il numero di risultati
-            solr_results = solr.search(solr_q, rows=0) # rows=0 per non restituire documenti, solo metadati
-            num_found = solr_results.hits
-            
-            if intent == "average_age":
-                # Richiede una query Solr più complessa con stats
-                # Solr example: q=*:*&stats=true&stats.field=age
-                stats_results = solr.search(solr_q, stats=['age'], rows=0)
-                age_stats = stats_results.stats.get('age', {})
-                if 'mean' in age_stats:
-                    average_age = age_stats['mean']
-                    return {
-                        "query": q,
-                        "interpreted_intent": intent,
-                        "solr_query": solr_q,
-                        "result_message": f"L'età media degli speaker che corrispondono ai criteri è di {average_age:.2f} anni.",
-                        "result_count": num_found,
-                        "applied_filters": solr_query_parts
-                    }
-                else:
-                    return {
-                        "query": q,
-                        "interpreted_intent": intent,
-                        "solr_query": solr_q,
-                        "result_message": "Impossibile calcolare l'età media per gli speaker trovati (dati insufficienti o non validi).",
-                        "result_count": num_found,
-                        "applied_filters": solr_query_parts
-                    }
-            else: # intent == "count"
-                return {
-                    "query": q,
-                    "interpreted_intent": intent,
-                    "solr_query": solr_q,
-                    "result_message": f"Ci sono {num_found} speaker che corrispondono ai criteri.",
-                    "result_count": num_found,
-                    "applied_filters": solr_query_parts
-                }
-
-        else: # intent == "list" o default
-            # Per l'elenco, recupera i documenti
-            solr_results = solr.search(solr_q, rows=100) # Limita a 100 risultati per l'elenco
-            
-            speaker_details = []
-            for doc in solr_results.docs:
-                speaker_details.append(doc) # Solr restituisce i documenti come dizionari
-
-            speaker_ids_list = [doc.get('id') for doc in solr_results.docs]
-
-            response_message = ""
-            if speaker_ids_list:
-                response_message = f"Gli speaker che corrispondono ai criteri sono: {', '.join(speaker_ids_list)}."
-            else:
-                response_message = "Nessuno speaker trovato con i criteri specificati."
-
-            return {
-                "query": q,
-                "interpreted_intent": intent,
-                "solr_query": solr_q,
-                "result_message": response_message,
-                "result_count": solr_results.hits,
-                "applied_filters": solr_query_parts,
-                "speaker_details": speaker_details
-            }
-
-    except pysolr.SolrError as e:
-        raise HTTPException(status_code=500, detail=f"Errore durante la query Solr: {e}")
+        resp = client.chat.completions.create(  # Call LLM Studio to generate Cypher
+            model="local-model",
+            messages=messages,
+            temperature=0.5,
+            max_tokens=500,
+            stream=False
+            )
+        cypher = resp.choices[0].message.content.strip()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore inatteso durante la query: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM service error: {e}")
+    # Execute Cypher against Neo4j
+    try:
+        with neo4j_connector.driver.session() as session:
+            result = session.run(cypher)
+            records = [record.data() for record in result]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cypher execution error: {e}")
+    return JSONResponse(content={"cypher": cypher, "results": records})
 
-"""
-
-# Puoi aggiungere altri endpoint se necessario
+# --- Root endpoint ---
 @app.get("/")
 async def read_root():
     return {"message": "API voicerecognition!"}

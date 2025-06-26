@@ -1,6 +1,7 @@
 import librosa
 import numpy as np
 
+# --- MFCC Extraction Functions ---
 def extract_mfcc_vector(file_path, n_mfcc=13):
     """
     Extracts the mean MFCC vector from an audio file.
@@ -24,6 +25,7 @@ def extract_mfcc_vector(file_path, n_mfcc=13):
         print(f"Error processing {file_path} for SC: {e}")
         return None
 
+# --- Spectral Centroid (SC) Extraction Functions ---
 def extract_spectral_centroid_vector(file_path):
     """
     Extracts the mean Spectral Centroid from an audio file.
@@ -40,11 +42,12 @@ def extract_spectral_centroid_vector(file_path):
             print(f"Warning: Audio file {file_path} is empty or too short. Skipping SC extraction.")
             return None
         spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-        return np.array([np.mean(spectral_centroids)]) # Ritorna un array numpy di dimensione (1,)
+        return np.array([np.mean(spectral_centroids)])
     except Exception as e:
         print(f"Error processing {file_path} for SC: {e}")
         return None
 
+# --- Root Mean Square (RMS) Extraction Functions ---
 def extract_rms_vector(file_path):
     """
     Extracts the Root Mean Square energy from an audio file.
@@ -66,6 +69,7 @@ def extract_rms_vector(file_path):
         print(f"Error processing {file_path} for RMS: {e}")
         return None
 
+# --- Zero Crossing Rate (ZCR) Extraction Functions ---
 def extract_zcr_vector(file_path):
     """
     Extracts the Zero Crossing Rate from an audio file.
@@ -87,6 +91,7 @@ def extract_zcr_vector(file_path):
         print(f"Error processing {file_path} for ZCR: {e}")
         return None
 
+# --- Combined Feature Extraction Function ---
 def extract_combined_features_vector(file_path, feature_types, n_mfcc=13):
     """
     Extracts a combined feature vector from an audio file based on specified feature types.
@@ -125,7 +130,7 @@ def extract_combined_features_vector(file_path, feature_types, n_mfcc=13):
     # Concatenate all feature vectors into a single vector
     return np.concatenate(all_features)
 
-"""# Example usage
+"""# --- Example usage ---
 if __name__ == "__main__":
     audio_path = "dataset/test/01/0_01_1.wav"
     

@@ -25,7 +25,6 @@ def index_creation_entries(features: str, n_mfcc: int = 13, percentage: float = 
         tuple: A tuple containing:
             - List of dictionaries with scaled feature vectors and metadata for upsert.
             - Dictionary with counts of selected audio files per speaker.
-        
     """
     
     if not (0.0 <= percentage <= 1.0):
@@ -65,7 +64,7 @@ def index_creation_entries(features: str, n_mfcc: int = 13, percentage: float = 
 
         selected_speaker_samples = random.sample(audio_list, min(num_to_select, len(audio_list)))
         selected_audio_paths.extend(selected_speaker_samples)
-        selected_audio_counts_per_speaker[speaker_id] = len(selected_speaker_samples) # update count of selected audio files per speaker
+        selected_audio_counts_per_speaker[speaker_id] = len(selected_speaker_samples) # Update count of selected audio files per speaker
     
     print(f"Total audio files selected: {len(selected_audio_paths)}")
 
