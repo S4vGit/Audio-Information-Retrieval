@@ -45,6 +45,8 @@ h1 {
 @media (min-width: 768px) { /* Due colonne su schermi più grandi */
   .components-container {
     grid-template-columns: 1fr 1fr;
+    /* Rimuovi altezza fissa da qui se è stata aggiunta in precedenza,
+       lasciamo che siano i singoli component-box a gestirla */
   }
 }
 
@@ -57,6 +59,11 @@ h1 {
   border: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
+  /* Impostiamo una altezza minima per i box per garantire uniformità */
+  min-height: 450px; /* Aumentato leggermente per accomodare più contenuto */
+  /* Impostiamo una altezza massima per evitare espansioni eccessive */
+  max-height: 600px; /* Aggiunto: Altezza massima per limitare la crescita */
+  overflow: hidden; /* Aggiunto: Nasconde il contenuto che eccede, gestito da scroll interni */
 }
 
 .component-box h2 {
@@ -156,6 +163,18 @@ h1 {
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
 }
 
+/* Nuovo stile per il pulsante Multimodal Query */
+.multimodal-query-button {
+  background-color: #28a745; /* Verde */
+  color: white;
+}
+
+.multimodal-query-button:hover:not(:disabled) {
+  background-color: #218838; /* Verde più scuro */
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
 .action-button:disabled {
   background-color: #cccccc;
   color: #666666;
@@ -184,6 +203,9 @@ h1 {
   margin-top: 30px;
   padding-top: 25px;
   border-top: 1px solid #eee;
+  /* Aggiunto: Altezza massima e scroll per la sezione risultati */
+  flex-grow: 1; /* Permette alla sezione di occupare lo spazio rimanente */
+  overflow-y: auto; /* Aggiunto: Rendi la sezione scorrevole verticalmente se il contenuto supera l'altezza */
 }
 
 .results-section h3 {
@@ -243,6 +265,20 @@ h1 {
 
 .result-item .metadata-details p {
   margin-bottom: 3px;
+}
+
+/* Updated: Style for Cypher query code to wrap long lines and handle overflow */
+.cypher-code {
+  white-space: pre-wrap; /* Ensures that white space is preserved and lines are wrapped */
+  word-break: break-all; /* Breaks words at any character to prevent overflow */
+  background-color: #eef;
+  padding: 10px;
+  border-radius: 5px;
+  font-family: monospace;
+  font-size: 0.9em;
+  margin-bottom: 20px;
+  max-height: 150px; /* Aggiunto: Altezza massima per il blocco del codice Cypher */
+  overflow-y: auto; /* Aggiunto: Rendi il blocco del codice scorrevole verticalmente */
 }
 
 .footer {

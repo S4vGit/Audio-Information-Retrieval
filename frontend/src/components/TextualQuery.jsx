@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Import useEffect
 
-function TextualQueryNeo4j() {
+function TextualQueryNeo4j({ onResultsChange }) { // Receive onResultsChange prop
   const [textQuery, setTextQuery] = useState('');
-  const [results, setResults] = useState(null); // To store both cypher and neo4j results
+  const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Use useEffect to call onResultsChange when results change
+  useEffect(() => {
+    if (onResultsChange) {
+      onResultsChange(results !== null && results.results && results.results.length > 0);
+    }
+  }, [results, onResultsChange]);
 
   const handleTextQuery = async () => {
     if (!textQuery.trim()) {
@@ -14,7 +21,7 @@ function TextualQueryNeo4j() {
 
     setLoading(true);
     setError(null);
-    setResults(null); // Clear previous results
+    setResults(null); 
 
     try {
       const response = await fetch(`http://localhost:8000/text-query/`, {
@@ -22,7 +29,7 @@ function TextualQueryNeo4j() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ nl_query: textQuery }), // Send as JSON body
+        body: JSON.stringify({ nl_query: textQuery }),
       });
 
       if (!response.ok) {
@@ -31,7 +38,7 @@ function TextualQueryNeo4j() {
       }
 
       const data = await response.json();
-      setResults(data); // Store the entire response (cypher, results)
+      setResults(data);
       console.log('Result textual query:', data);
 
     } catch (err) {

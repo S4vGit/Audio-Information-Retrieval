@@ -5,11 +5,12 @@ function SpeakerRecognition() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [metrics, setMetrics] = useState(null);
 
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
-      const validExtensions = ['.wav', '.mp3', '.flac', '.ogg'];
+      const validExtensions = ['.wav', '.mp3', '.flac', '.ogg', '.webm'];
       const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
 
       if (validExtensions.includes(fileExtension)) {
@@ -17,7 +18,7 @@ function SpeakerRecognition() {
         setError(null);
       } else {
         setSelectedFile(null);
-        setError('Choose one of this audio file format (.wav, .mp3, .flac, .ogg).');
+        setError('Choose one of these audio file formats (.wav, .mp3, .flac, .ogg, .webm).');
       }
     }
   };
@@ -31,6 +32,7 @@ function SpeakerRecognition() {
     setLoading(true);
     setError(null);
     setResults([]);
+    setMetrics(null);
 
     const formData = new FormData();
     formData.append('audio_file', selectedFile);
@@ -48,10 +50,12 @@ function SpeakerRecognition() {
 
       const data = await response.json();
       setResults(data.results);
-      console.log('Backend results:', data.results);
+      setMetrics(data.metrics);
+      console.log('Backend Results:', data.results);
+      console.log('Backend Metrics:', data.metrics);
 
     } catch (err) {
-      console.error('Error during loading:', err);
+      console.error('Error during upload:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -66,12 +70,12 @@ function SpeakerRecognition() {
 
       <div className="form-group">
         <label htmlFor="audio-upload">
-          Choose a file audio (.wav, .mp3, .flac, .ogg):
+          Choose an audio file (.wav, .mp3, .flac, .ogg, .webm):
         </label>
         <input
           type="file"
           id="audio-upload"
-          accept=".wav, .mp3, .flac, .ogg, audio/wav, audio/mpeg, audio/flac, audio/ogg"
+          accept=".wav, .mp3, .flac, .ogg, .webm, audio/wav, audio/mpeg, audio/flac, audio/ogg, audio/webm"
           onChange={handleFileChange}
         />
         {selectedFile && (
@@ -103,20 +107,36 @@ function SpeakerRecognition() {
         )}
       </button>
 
-      {results.length > 0 && (
+      {/* Sezione per i risultati di riconoscimento dello speaker e ora anche le metriche */}
+      {(results.length > 0 || metrics) && ( // Mostra la sezione se ci sono risultati O metriche
         <div className="results-section">
           <h3>Speaker Recognition Results</h3>
-          <ul className="results-list">
-            {results.map((result, index) => (
-              <li key={index} className="result-item">
-                <p>Speaker ID: <span className="speaker-id">{result.speaker_id}</span></p>
-                <p>Score: <span className="score">{result.score.toFixed(4)}</span></p>
-              </li>
-            ))}
-          </ul>
-          <p className="info-text">
-            The score indicates the confidence level of the speaker recognition. A higher score means a more confident match.
-          </p>
+          {results.length > 0 && (
+            <>
+              <ul className="results-list">
+                {results.map((result, index) => (
+                  <li key={index} className="result-item">
+                    <p>Speaker ID: <span className="speaker-id">{result.speaker_id}</span></p>
+                    <p>Score: <span className="score">{result.score.toFixed(4)}</span></p>
+                  </li>
+                ))}
+              </ul>
+              <p className="info-text">
+                The score indicates the confidence level of the speaker recognition. A higher score means a higher confidence in the match.
+              </p>
+            </>
+          )}
+
+          {metrics && (
+            <div className="metrics-section-inner">
+              <h3>Evaluation Metrics</h3>
+              <div className="metrics-summary">
+                <p><strong>Precision@5:</strong> {metrics.precision_at_5.toFixed(4)}</p>
+                <p><strong>Recall:</strong> {metrics.recall.toFixed(4)}</p>
+                <p><strong>F1-Score:</strong> {metrics.f1_score.toFixed(4)}</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
