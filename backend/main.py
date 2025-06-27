@@ -18,7 +18,7 @@ sys.path.append(str(Path(__file__).resolve().parent))
 
 from backend.pinecone.feature_extraction import extract_combined_features_vector
 from backend.pinecone.pinecone_setup import initialize_pinecone_index_features
-from backend.text_retrieval import load_metadata, build_textual_profiles, compute_embeddings
+from backend.utils import load_metadata, compute_metrics
 from neo4j_connector import Neo4jConnector
 
 
@@ -34,6 +34,9 @@ FEATURE_DIMENSIONS = {
     'rms': 1,
     'zcr': 1,
 }
+
+# --- Load metadata ---
+metadata = load_metadata()
 
 # --- Function to calculate the vector dimension ---
 def calculate_vector_dimension(features_list: list, n_mfcc: int) -> int:
@@ -58,16 +61,16 @@ def calculate_vector_dimension(features_list: list, n_mfcc: int) -> int:
 
 VECTOR_DIM = calculate_vector_dimension(USED_FEATURES, N_MFCC_USED)
 
-# Inizializza Pinecone e lo scaler globalmente una volta all'avvio dell'applicazione
+# --- Global Variables ---
 speaker_recognition_index = None
 speaker_recognition_scaler = None
 neo4j_connector = None
 client = None
 
-text_encoder: SentenceTransformer = None # Modello per embedding testuali
-all_speaker_ids: List[str] = [] # ID degli speaker caricati
-all_metadata_embeddings: np.ndarray = None # Embedding dei profili testuali
-all_raw_metadata: Dict[str, Any] = {} # Metadati originali (utile per i risultati)
+text_encoder: SentenceTransformer = None # SentenceTransformer model for text encoding
+all_speaker_ids: List[str] = [] # IDs of all speakers in the dataset
+all_metadata_embeddings: np.ndarray = None # Embeddings of all metadata (useful for text queries)
+all_raw_metadata: Dict[str, Any] = {} # Original metadata (useful for results)
 
 # --- Function to convert audio files to WAV format ---
 def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
@@ -81,7 +84,7 @@ def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
     Returns:
         Path: Path to the converted WAV file, or None if conversion fails.
     """
-    if not output_wav_path.lower().endswith('.wav'):
+    if not str(output_wav_path).lower().endswith('.wav'):
         print(f"Erorr: output_wav_path must end with '.wav', but '{output_wav_path}'")
         return None
 
@@ -100,7 +103,7 @@ def convert_audio_to_wav(input_audio_path: Path, output_wav_path: Path):
 
 app = FastAPI()
 
-# CORS Configuration
+# --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], 
@@ -150,32 +153,9 @@ async def startup_event():
     # Initialize LM Studio client
     try:
         client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+        print("LM Studio client initialized successfully.")
     except Exception as e:
         raise RuntimeError(f"Error connecting to LM Studio client: {e}")
-
-"""@app.on_event("startup")
-async def startup_event():
-    global text_encoder, all_speaker_ids, all_metadata_embeddings, all_raw_metadata
-
-    # 2. Inizializzazione SentenceTransformer e caricamento embedding
-    print("Inizializzazione SentenceTransformer e caricamento embedding metadati...")
-    try:
-        # Carica i metadati usando la funzione da ir_utils.py
-        # Il percorso deve essere corretto dal punto di vista del main.py
-        # main.py è in 'backend/', audioMNIST_meta.txt è in 'dataset/' (root del progetto)
-        # Quindi '..' per andare su a 'project_root', poi 'dataset/audioMNIST_meta.txt'
-        metadata_file_path = Path(__file__).parent.parent / "dataset/audioMNIST_meta.txt"
-        
-        all_raw_metadata = load_metadata(str(metadata_file_path))
-        profiles = build_textual_profiles(all_raw_metadata)
-        
-        text_encoder = SentenceTransformer('all-MiniLM-L6-v2')
-        all_speaker_ids, all_metadata_embeddings = compute_embeddings(profiles, text_encoder)
-        
-        print(f"Caricati e processati {len(all_speaker_ids)} profili per la ricerca semantica.")
-    except Exception as e:
-        print(f"Errore durante l'inizializzazione SentenceTransformer/embedding: {e}")
-        # Gestisci l'errore, l'applicazione potrebbe non funzionare correttamente per le query semantiche"""
 
 
 # --- Endpoint for speaker recognition ---
@@ -203,15 +183,6 @@ async def upload_audio(audio_file: UploadFile = File(...)):
     tmp_original_file_path = None
     tmp_wav_file_path = None
     audio_for_processing_path = None
-    
-    """if not audio_file.filename.endswith(".wav"):
-        raise HTTPException(status_code=400, detail="Sono supportati solo i file WAV.")"""
-
-    """# Crea un file temporaneo per salvare l'audio caricato
-    # Questo è più sicuro e gestisce meglio i file di grandi dimensioni
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-        tmp_file.write(await audio_file.read())
-        tmp_file_path = Path(tmp_file.name)"""
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=original_file_extension) as tmp_original_file:
@@ -244,6 +215,10 @@ async def upload_audio(audio_file: UploadFile = File(...)):
             top_k=5, # Get the top 5 most similar speakers
             include_metadata=True # Include metadata 
         )
+        
+        # --- DEBUG ---
+        print(f"Query results: {query_results}")
+        metrics = compute_metrics(query_results, audio_file.filename) # Compute metrics for evaluation
 
         results = []
         # Extract results
@@ -255,7 +230,7 @@ async def upload_audio(audio_file: UploadFile = File(...)):
         # Sort results by score in descending order
         results.sort(key=lambda x: x.score, reverse=True)
 
-        return {"message": "Audio processed successfully", "results": results}
+        return {"message": "Audio processed successfully", "results": results, "metrics": metrics}
 
     except Exception as e:
         print(f"Error processing audio: {e}")
@@ -337,19 +312,21 @@ You are given the schema of a Neo4j graph database with the following entities a
 - Location nodes with properties: city, country
 - RecordingRoom nodes with property: name
 Relations:
-- (s:Speaker)-[:HAS_ACCENT]->(a:Accent)
-- (s:Speaker)-[:RECORDED_IN {date}]->(r:RecordingRoom)
-- (s:Speaker)-[:FROM_LOCATION]->(l:Location)
+- (s:Speaker)-[:HAS_ACCENT]-(a:Accent)
+- (s:Speaker)-[:RECORDED_IN {date}]-(r:RecordingRoom)
+- (s:Speaker)-[:FROM_LOCATION]-(l:Location)
 Generate ONLY the valid Cypher query that fulfills the user's requirement in one single statement. 
 IMPORTANT: For numeric comparisons, use operators like <, >, <=, >= directly (e.g., s.age < 30), do NOT use functions like lt(), gt(), etc.
+IMPORTANT: For numeric ranges, do NOT use BETWEEN ... AND ...; instead, use property >= value1 AND property <= value2 (e.g., s.age >= 25 AND s.age <= 35).
 KEEP IN MIND: the operator "!=" doesn't work, use "<>" instead. 
 For property comparisons other than equality, use the WHERE clause. Do not use comparison operators inside curly braces.
+DO NOT add conditions not required.
+Do NOT rename the entities or relationships.
 Do not include any explanations or code comments."""
 
-    
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": query.nl_query}
+        {"role": "user", "content": query.nl_query + "\n Answer only with the Cypher query."}
     ]
 
     try:
@@ -371,6 +348,288 @@ Do not include any explanations or code comments."""
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Cypher execution error: {e}")
     return JSONResponse(content={"cypher": cypher, "results": records})
+
+
+
+
+
+
+
+
+
+# --- Endpoint for multimodal digit recognition ---
+@app.post("/multimodal-digit-recognition/")
+async def multimodal_digit_recognition(
+    text_digit: str = Form(...), # Ricevi la cifra testuale come Form data
+    audio_file: UploadFile = File(...) # Ricevi il file audio
+):
+    """
+    Performs multimodal digit recognition by comparing a text digit with an audio digit.
+    
+    Args:
+        text_digit (str): The digit provided as text (0-9).
+        audio_file (UploadFile): The audio file containing the spoken digit.
+        
+    Returns:
+        JSONResponse: A response indicating if the digit matches and recognition details.
+    """
+    if not speaker_recognition_scaler or not speaker_recognition_index:
+        raise HTTPException(status_code=500, detail="Pinecone index or scaler not initialized. Please check the server logs.")
+
+    # Validazione della cifra testuale
+    if not text_digit.isdigit() or not (0 <= int(text_digit) <= 9):
+        raise HTTPException(status_code=400, detail="Text digit must be a single digit between 0 and 9.")
+
+    original_file_extension = Path(audio_file.filename).suffix.lower()
+    supported_audio_extensions = ['.wav', '.mp3', '.flac', '.ogg', '.webm']
+
+    if original_file_extension not in supported_audio_extensions:
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported formats are: {', '.join(supported_audio_extensions)}.")
+
+    tmp_original_file_path = None
+    tmp_wav_file_path = None
+    audio_for_processing_path = None
+
+    try:
+        # Salva il file audio temporaneamente
+        with tempfile.NamedTemporaryFile(delete=False, suffix=original_file_extension) as tmp_original_file:
+            tmp_original_file.write(await audio_file.read())
+            tmp_original_file_path = Path(tmp_original_file.name)
+        
+        # Converte in WAV se necessario
+        if original_file_extension != '.wav':
+            tmp_wav_file_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name)
+            converted_path = convert_audio_to_wav(tmp_original_file_path, tmp_wav_file_path)
+            
+            if converted_path is None:
+                raise HTTPException(status_code=500, detail="Error converting audio file to WAV format.")
+            audio_for_processing_path = converted_path
+        else:
+            audio_for_processing_path = tmp_original_file_path
+
+        # 1. Estrai le feature dall'audio
+        raw_features = extract_combined_features_vector(audio_for_processing_path, USED_FEATURES, N_MFCC_USED)
+        if raw_features is None:
+            raise HTTPException(status_code=500, detail="Error extracting features from audio.")
+
+        # 2. Scala le feature
+        scaled_features = speaker_recognition_scaler.transform(raw_features.reshape(1, -1))[0]
+
+        # 3. Interroga Pinecone con le feature scalate
+        # Cerchiamo i top k speakers più simili includendo i metadati
+        query_results = speaker_recognition_index.query(
+            vector=scaled_features.tolist(),
+            top_k=5, # Ottieni i top 5 risultati
+            include_metadata=True # È cruciale includere i metadati per ottenere la cifra
+        )
+
+        matched_digit = None
+        best_score = 0.0
+        recognition_results = []
+        
+        # Estrai i risultati di Pinecone e cerca la cifra pronunciata
+        for match in query_results.matches:
+            speaker_id = match.metadata.get('speaker_id', 'Unknown')
+            audio_digit_from_pinecone = match.metadata.get('digit') 
+            score = match.score
+
+            processed_audio_digit = None
+            if audio_digit_from_pinecone is not None:
+                try:
+                    # Converte in intero e poi in stringa per consistenza
+                    # Gestisce sia i float (es. 4.0 -> 4 -> '4') che gli interi (es. 4 -> '4')
+                    processed_audio_digit = str(int(audio_digit_from_pinecone))
+                except (ValueError, TypeError):
+                    # Fallback nel caso in cui non sia un numero o non possa essere convertito
+                    processed_audio_digit = str(audio_digit_from_pinecone)
+
+            recognition_results.append({
+                "speaker_id": speaker_id,
+                "score": score,
+                "audio_digit_recognized": processed_audio_digit # Usa il digit formattato
+            })
+
+            # Trova il digit con il punteggio più alto
+            if score > best_score:
+                best_score = score
+                matched_digit = processed_audio_digit # Usa il digit formattato per il miglior match
+
+        is_match = False
+        if matched_digit and matched_digit == text_digit:
+            is_match = True
+
+        return JSONResponse(content={
+            "text_digit_input": text_digit,
+            "audio_digit_recognized_by_pinecone": matched_digit,
+            "is_match": is_match,
+            "recognition_details": recognition_results # Dettagli completi dei match di Pinecone
+        })
+
+    except Exception as e:
+        print(f"Error during multimodal digit recognition: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+    finally:
+        # Pulisci i file temporanei
+        if tmp_original_file_path and tmp_original_file_path.exists():
+            os.unlink(tmp_original_file_path)
+        if tmp_wav_file_path and tmp_wav_file_path.exists():
+            os.unlink(tmp_wav_file_path)
+
+
+
+
+
+# --- Endpoint for combined text and audio (multimodal) query ---
+@app.post("/multimodal-query/")
+async def multimodal_query(
+    nl_query_text: str = Form(..., description="Natural language query for text retrieval"),
+    audio_file: UploadFile = File(...)
+):
+    """
+    Processes a natural language query for text retrieval and an audio file for speaker recognition,
+    then verifies if the recognized speaker ID from audio is present in the results of the text query.
+
+    Args:
+        nl_query_text (str): The natural language query for the textual search.
+        audio_file (UploadFile): The audio file for speaker recognition.
+
+    Returns:
+        JSONResponse: A response containing the recognized audio speaker ID,
+                      speaker IDs from text query, and a match status.
+    """
+    # --- Part 1: Process Text Query (similar to /text-query/) ---
+    if neo4j_connector is None or client is None: 
+        raise HTTPException(status_code=500, detail="Neo4j connector or LLM client not initialized. Please check the server logs.")  
+
+    SYSTEM_PROMPT = """  
+You are given the schema of a Neo4j graph database with the following entities and relationships:  
+- Speaker nodes with properties: id, age (integer), gender (male or female), native_speaker (yes or no)  
+- Accent nodes with property: name  
+- Location nodes with properties: city, country  
+- RecordingRoom nodes with property: name# 
+Relations:  
+- (s:Speaker)-[:HAS_ACCENT]-(a:Accent)  
+- (s:Speaker)-[:RECORDED_IN {date}]-(r:RecordingRoom)  
+- (s:Speaker)-[:FROM_LOCATION]-(l:Location) 
+Generate ONLY the valid Cypher query that fulfills the user's requirement in one single statement. 
+IMPORTANT: For numeric comparisons, use operators like <, >, <=, >= directly (e.g., s.age < 30), do NOT use functions like lt(), gt(), etc. 
+IMPORTANT: For numeric ranges, do NOT use BETWEEN ... AND ...; instead, use property >= value1 AND property <= value2 (e.g., s.age >= 25 AND s.age <= 35).
+KEEP IN MIND: the operator "!=" doesn't work, use "<>" instead. 
+For property comparisons other than equality, use the WHERE clause. Do not use comparison operators inside curly braces. 
+DO NOT add conditions not required. 
+Do NOT rename the entities or relationships.
+Do not include any explanations or code comments.""" 
+
+    messages = [ 
+        {"role": "system", "content": SYSTEM_PROMPT}, 
+        {"role": "user", "content": nl_query_text + "\n Answer only with the Cypher query."}  
+    ]  
+
+    text_query_speaker_ids = []
+    try:
+        resp = client.chat.completions.create( 
+            model="local-model",  
+            messages=messages,  
+            temperature=0.3,  
+            max_tokens=500, 
+            stream=False 
+        )  
+        cypher = resp.choices[0].message.content.strip()  
+        with neo4j_connector.driver.session() as session:  
+            result = session.run(cypher) 
+
+            # --- Debugging ---
+            print(f"Generated Cypher Query: {cypher}")
+            records_list = [record.data() for record in result] 
+            print(f"Neo4j Raw Records: {records_list}")
+            # --- End of debugging prints ---
+            
+            for record in records_list: 
+                if 's' in record and 'id' in record['s']:
+                    text_query_speaker_ids.append(record['s']['id'])
+                elif 'speaker_id' in record: # Check for direct speaker_id return
+                    text_query_speaker_ids.append(record['speaker_id'])
+                elif 'id' in record: # Check for direct id return
+                    text_query_speaker_ids.append(record['id'])
+            text_query_speaker_ids = list(set(text_query_speaker_ids)) # Remove duplicates
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing text query: {e}")
+
+    # --- Part 2: Process Audio ---
+    if not speaker_recognition_scaler or not speaker_recognition_index: # 
+        raise HTTPException(status_code=500, detail="Pinecone index or scaler not initialized. Please check the server logs.") 
+
+    original_file_extension = Path(audio_file.filename).suffix.lower() 
+    supported_audio_extensions = ['.wav', '.mp3', '.flac', '.ogg', '.webm']  
+
+    if original_file_extension not in supported_audio_extensions: 
+        raise HTTPException(status_code=400, detail=f"Unsupported audio file format. Supported formats are: {', '.join(supported_audio_extensions)}.")  
+
+    tmp_original_file_path = None
+    tmp_wav_file_path = None
+    audio_for_processing_path = None
+    recognized_audio_speaker_id = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=original_file_extension) as tmp_original_file:  
+            tmp_original_file.write(await audio_file.read())  
+            tmp_original_file_path = Path(tmp_original_file.name)  
+
+        if original_file_extension != '.wav':  
+            tmp_wav_file_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name)  
+            converted_path = convert_audio_to_wav(tmp_original_file_path, tmp_wav_file_path)  
+            if converted_path is None:  
+                raise HTTPException(status_code=500, detail="Error converting audio file to WAV format.")  
+            audio_for_processing_path = converted_path  
+        else:  
+            audio_for_processing_path = tmp_original_file_path  
+
+        raw_features = extract_combined_features_vector(audio_for_processing_path, USED_FEATURES, N_MFCC_USED)  
+        if raw_features is None:  
+            raise HTTPException(status_code=500, detail="Error extracting features from audio.") 
+
+        scaled_features = speaker_recognition_scaler.transform(raw_features.reshape(1, -1))[0] 
+
+        query_results = speaker_recognition_index.query(  
+            vector=scaled_features.tolist(),  
+            top_k=1, # Get only the top 1 most similar speaker
+            include_metadata=True
+        )
+
+        if query_results.matches:  
+            recognized_audio_speaker_id = query_results.matches[0].metadata.get('speaker_id', 'Unknown')  
+
+    except Exception as e:
+        print(f"Error processing audio for recognition: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error during audio processing: {e}")
+    finally:
+        if tmp_original_file_path and tmp_original_file_path.exists():
+            os.unlink(tmp_original_file_path)
+        if tmp_wav_file_path and tmp_wav_file_path.exists():
+            os.unlink(tmp_wav_file_path)
+
+    # --- Part 3: Verification and Final Output ---
+    match_status_message = "Audio does not belong to any of the selected speaker"
+    matched_id_params = None
+
+    if recognized_audio_speaker_id and recognized_audio_speaker_id in text_query_speaker_ids:
+        # Retrieve parameters for the matched ID from the original dataset (audioMNIST_meta.txt)
+        matched_id_params = metadata.get(recognized_audio_speaker_id, {}) 
+
+        if matched_id_params:
+            params_str = ", ".join(f"{k}: {v}" for k, v in matched_id_params.items())
+            match_status_message = f"Audio belongs to {recognized_audio_speaker_id}: {params_str}"
+        else:
+            match_status_message = f"Audio belongs to {recognized_audio_speaker_id}, but details could not be retrieved from metadata."
+
+    print(f"Final text_query_speaker_ids before JSONResponse: {text_query_speaker_ids}")
+
+    return JSONResponse(content={
+        "audio_recognized_speaker_id": recognized_audio_speaker_id,
+        "text_query_speaker_ids": text_query_speaker_ids,
+        "match_status": match_status_message
+    })
+
 
 # --- Root endpoint ---
 @app.get("/")

@@ -9,9 +9,12 @@ from collections import defaultdict
 from backend.pinecone.feature_extraction import extract_combined_features_vector
 from sklearn.preprocessing import StandardScaler
 
+# --- Load metadata from the JSON file ---
 with open("dataset/audioMNIST_meta.txt", "r") as f:
     metadata_json = json.load(f)
 
+
+# --- Function to create entries for upsert into Pinecone index ---
 def index_creation_entries(features: str, n_mfcc: int = 13, percentage: float = 1.0):
     """
     Extracts features from audio files in the training dataset, scales them, and prepares them for upsert into a Pinecone index.
